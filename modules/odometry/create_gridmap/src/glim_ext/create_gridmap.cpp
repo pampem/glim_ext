@@ -5,6 +5,7 @@
 #include <deque>
 #include <mutex>
 #include <atomic>
+#include <nav_msgs/msg/detail/occupancy_grid__struct.hpp>
 #include <thread>
 #include <chrono>
 
@@ -20,6 +21,11 @@
 #include <glim/util/logging.hpp>
 #include <glim/util/extension_module.hpp>
 #include <glim/util/concurrent_vector.hpp>
+
+#include <string>
+#include <memory>
+#include <algorithm>
+#include <vector>
 
 namespace glim {
 
@@ -51,6 +57,8 @@ private:
   std::string gridmap_frame_id_;
 
   std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>> gridmap_pub_;
+  std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>> submap_pub_;
+  std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>> sensor_frame_gridmap_pub_;
   std::unique_ptr<tf2_ros::TransformBroadcaster> tf_broadcaster_;
 
   std::atomic_bool running_;
@@ -58,7 +66,7 @@ private:
   std::thread publisher_thread_;
 
   ConcurrentVector<EstimationFrame::ConstPtr> frame_queue_;
-  ConcurrentVector<std::vector<SubMap::Ptr>> submap_queue_;
+  std::vector<SubMap::Ptr> submaps_;
 
   std::deque<std::vector<Eigen::Vector4d>> SensorframeDataDeque_;
 
@@ -73,12 +81,12 @@ GridmapExtensionModule::GridmapExtensionModule()
   logger_->info("Starting GridmapExtensionModule");
 
   gridmap_frame_id_ = "odom";
-  grid_width_ = 100;   // gridmapの幅。gridmapのセルがいくつ横にあるか
-  grid_height_ = 100;  // gridmapの高さ。gridmapのセルがいくつ縦にあるか
+  grid_width_ = 60;   // gridmapの幅。gridmapのセルがいくつ横にあるか
+  grid_height_ = 60;  // gridmapの高さ。gridmapのセルがいくつ縦にあるか
   // 原点はGridmapの左下の点。それがワールド座標系のどこに位置するか。
   gridmap_origin_x_ = -25.0F;  // gridmapの原点[m]。ワールド座標系に対応する。
   gridmap_origin_y_ = -25.0F;  // gridmapの原点[m]。ワールド座標系に対応する。
-  resolution_ = 0.5F;          // Gridmap 1セルの高さ[m](幅)。1セルは正方形。
+  resolution_ = 1.0F;          // Gridmap 1セルの高さ[m](幅)。1セルは正方形。
   lower_bound_for_pt_z_ = 0.5;  // Gridmapに入れる点の高さ方向のフィルタリング。最低高さ。
   upper_bound_for_pt_z_ = 1.5;  // 最高高さ。
   gridmap_data_ = std::vector<int>(grid_width_ * grid_height_, 0);
@@ -92,6 +100,9 @@ GridmapExtensionModule::GridmapExtensionModule()
 
   auto node = rclcpp::Node::make_shared("gridmap_publisher_node");
   gridmap_pub_ = node->create_publisher<nav_msgs::msg::OccupancyGrid>("slam_gridmap", 10);
+  submap_pub_ = node->create_publisher<nav_msgs::msg::OccupancyGrid>("submap", 10);
+  sensor_frame_gridmap_pub_ =
+    node->create_publisher<nav_msgs::msg::OccupancyGrid>("sensor_frame_gridmap", 10);
   tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(node);
 
   running_ = true;
@@ -116,7 +127,9 @@ void GridmapExtensionModule::on_new_frame(const EstimationFrame::ConstPtr& new_f
 }
 
 void GridmapExtensionModule::on_update_submaps(const std::vector<SubMap::Ptr>& submaps) {
-  submap_queue_.push_back(submaps);
+  submaps_ = submaps;
+  std::cout << "submap callback called" << std::endl;
+  process_submaps(submaps);
 }
 
 void GridmapExtensionModule::task() {
@@ -130,14 +143,6 @@ void GridmapExtensionModule::task() {
     if (!frames.empty()) {
       for (const auto& frame : frames) {
         process_frame(frame);
-      }
-    }
-
-    // Process new submaps
-    auto submaps_list = submap_queue_.get_all_and_clear();
-    if (!submaps_list.empty()) {
-      for (const auto& submaps : submaps_list) {
-        process_submaps(submaps);
       }
     }
   }
@@ -172,7 +177,19 @@ void GridmapExtensionModule::publish_gridmap() {
             std::max(gridmap_realtime_data_[index], gridmap_submap_data_[index]);
         }
       }
+      nav_msgs::msg::OccupancyGrid submap_grid = occupancy_grid;
+      nav_msgs::msg::OccupancyGrid sensor_frame_gridmap = occupancy_grid;
+      for (int y = 0; y < grid_height_; ++y) {
+        for (int x = 0; x < grid_width_; ++x) {
+          int index = y * grid_width_ + x;
+          submap_grid.data[index] = gridmap_submap_data_[index];
+          sensor_frame_gridmap.data[index] = gridmap_realtime_data_[index];
+        }
+      }
+      // TODO(Izumita): submapが得られていないことがわかったので、Fix
       gridmap_pub_->publish(occupancy_grid);
+      submap_pub_->publish(submap_grid);
+      sensor_frame_gridmap_pub_->publish(sensor_frame_gridmap);
     }
   }
 }
@@ -210,28 +227,55 @@ void GridmapExtensionModule::process_frame(const EstimationFrame::ConstPtr& new_
 
 void GridmapExtensionModule::process_submaps(const std::vector<SubMap::Ptr>& submaps) {
   std::lock_guard<std::mutex> lock(submap_data_mutex_);
-  std::vector<Eigen::Vector4d> submap_points;
+
+  // std::fill(gridmap_submap_data_.begin(), gridmap_submap_data_.end(), 0);
+
   for (const auto& submap : submaps) {
     if (!submap->frame) continue;
     const auto& t_world_submap = submap->T_world_origin.cast<double>();
+
     for (size_t i = 0; i < submap->frame->size(); i++) {
       const Eigen::Vector4d& pt_local = submap->frame->points[i];
       Eigen::Vector4d pt_world = t_world_submap * pt_local;
+
       if (pt_world.z() >= lower_bound_for_pt_z_ && pt_world.z() <= upper_bound_for_pt_z_) {
-        submap_points.push_back(pt_world);
+        int x = static_cast<int>((pt_world.x() - gridmap_origin_x_) / resolution_);
+        int y = static_cast<int>((pt_world.y() - gridmap_origin_y_) / resolution_);
+
+        if (x >= 0 && x < grid_width_ && y >= 0 && y < grid_height_) {
+          int index = y * grid_width_ + x;
+          gridmap_submap_data_[index] = 100;
+          std::cout << "I got thisssss" << std::endl;
+        }
       }
     }
   }
-  // std::fill(gridmap_submap_data_.begin(), gridmap_submap_data_.end(), 0);
-  for (const Eigen::Vector4d& pt : submap_points) {
-    int x = static_cast<int>((pt.x() - gridmap_origin_x_) / resolution_);
-    int y = static_cast<int>((pt.y() - gridmap_origin_y_) / resolution_);
-    if (x >= 0 && x < grid_width_ && y >= 0 && y < grid_height_) {
-      int index = y * grid_width_ + x;
-      gridmap_submap_data_[index] = 100;
-    }
-  }
 }
+
+// void GridmapExtensionModule::process_submaps(const std::vector<SubMap::Ptr>& submaps) {
+//   std::lock_guard<std::mutex> lock(submap_data_mutex_);
+//   std::vector<Eigen::Vector4d> submap_points;
+//   for (const auto& submap : submaps) {
+//     if (!submap->frame) continue;
+//     const auto& t_world_submap = submap->T_world_origin.cast<double>();
+//     for (size_t i = 0; i < submap->frame->size(); i++) {
+//       const Eigen::Vector4d& pt_local = submap->frame->points[i];
+//       Eigen::Vector4d pt_world = t_world_submap * pt_local;
+//       if (pt_world.z() >= lower_bound_for_pt_z_ && pt_world.z() <= upper_bound_for_pt_z_) {
+//         submap_points.push_back(pt_world);
+//       }
+//     }
+//   }
+//   // std::fill(gridmap_submap_data_.begin(), gridmap_submap_data_.end(), 0);
+//   for (const Eigen::Vector4d& pt : submap_points) {
+//     int x = static_cast<int>((pt.x() - gridmap_origin_x_) / resolution_);
+//     int y = static_cast<int>((pt.y() - gridmap_origin_y_) / resolution_);
+//     if (x >= 0 && x < grid_width_ && y >= 0 && y < grid_height_) {
+//       int index = y * grid_width_ + x;
+//       gridmap_submap_data_[index] = 100;
+//     }
+//   }
+// }
 
 }  // namespace glim
 

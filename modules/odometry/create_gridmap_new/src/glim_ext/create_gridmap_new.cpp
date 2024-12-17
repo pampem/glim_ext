@@ -26,6 +26,23 @@ public:
     logger_ -> info("Starting create_gridmap...");
 
     auto node = rclcpp::Node::make_shared("create_gridmap_new_node");
+
+    // 1. rosになんらかPubできるかテストしてみる
+    // 2. SubmapをGridmapにしてPubする
+    // 3. Realtime点群、on_new_frameか、on_update_framesのどちらがいいのか検討してこれも実装
+
+    // gridmap_pub_ = node->create_publisher<nav_msgs::msg::OccupancyGrid>("slam_gridmap", 10);
+
+    SubMappingCallbacks::on_new_submap.add([this](const SubMap::ConstPtr& submap) {
+      std::cout << console::blue;
+      std::cout << boost::format("--- SubMapping::on_new_submap (thread:%d) ---") %
+                     std::this_thread::get_id()
+                << std::endl;
+      std::cout << "id:" << submap->id << std::endl;
+      std::cout << console::reset;
+      on_new_submap(submap);
+    });
+
     // OdometryEstimation
     
     OdometryEstimationCallbacks::on_new_frame.add([](const EstimationFrame::ConstPtr& frame) {
@@ -144,12 +161,23 @@ public:
     //             << std::endl;
     //   std::cout << console::reset;
     // });
+  
+  } //コンストラクタ?おわり
+
+  void on_new_submap(const SubMap::ConstPtr&  /*submap*/){
+    logger_ -> info("New submap received");
   }
   ~CreateGridmap() override = default;
 
 private:
   std::shared_ptr<spdlog::logger> logger_;
+  // std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>> gridmap_pub_;
 };
+
+
+
+
+
 }  // namespace glim
 
 extern "C" glim::ExtensionModule* create_extension_module() {

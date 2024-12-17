@@ -14,10 +14,12 @@ add_library(create_gridmap_new SHARED
 target_include_directories(create_gridmap_new PRIVATE
   include
   ${nav_msgs_INCLUDE_DIRS}
+  ${glim_ext_LIBRARIES}
 )
 target_link_libraries(create_gridmap_new
   glim::glim
   rclcpp::rclcpp
+  ${glim_ext_LIBRARIES}
 )
 
 # シンボルルックアップエラーが出るため、これは必要。

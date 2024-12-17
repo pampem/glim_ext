@@ -1,0 +1,12 @@
+{
+  "gridmap_param": {
+    "frame_id": "odomfjaofja",
+    "width": 60,
+    "height": 60,
+    "origin_x": -25.0,
+    "origin_y": -25.0,
+    "resolution": 1.0,
+    "lower_boud_for_pt_z": 0.5,
+    "upper_boud_for_pt_z": 1.5
+  }
+}

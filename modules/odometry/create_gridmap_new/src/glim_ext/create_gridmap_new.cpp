@@ -18,6 +18,8 @@
 
 #include <nav_msgs/msg/occupancy_grid.hpp>
 
+// グローバル変数は使えないことが多いので注意。特にROS関連。
+
 namespace glim {
 
 class CreateGridmap : public ExtensionModule {
@@ -25,13 +27,13 @@ public:
   CreateGridmap() : logger_(create_module_logger("create_gridmap")) {
     logger_ -> info("Starting create_gridmap...");
 
-    auto node = rclcpp::Node::make_shared("create_gridmap_new_node");
+    node_ = rclcpp::Node::make_shared("create_gridmap_new_node");
 
-    // 1. rosになんらかPubできるかテストしてみる
+    gridmap_pub_ = node_->create_publisher<nav_msgs::msg::OccupancyGrid>("gridmap", 10);
+
+    // 1. rosにon_new_submapからPubできるかテストしてみる
     // 2. SubmapをGridmapにしてPubする
     // 3. Realtime点群、on_new_frameか、on_update_framesのどちらがいいのか検討してこれも実装
-
-    // gridmap_pub_ = node->create_publisher<nav_msgs::msg::OccupancyGrid>("slam_gridmap", 10);
 
     SubMappingCallbacks::on_new_submap.add([this](const SubMap::ConstPtr& submap) {
       std::cout << console::blue;
@@ -163,20 +165,34 @@ public:
     // });
   
   } //コンストラクタ?おわり
-
+  ~CreateGridmap() override = default;
+  
   void on_new_submap(const SubMap::ConstPtr&  /*submap*/){
     logger_ -> info("New submap received");
+    nav_msgs::msg::OccupancyGrid gridmap;
+    gridmap.header.stamp = node_->get_clock()->now();
+    gridmap.header.frame_id = "map";
+    gridmap.info.resolution = 0.1;
+    gridmap.info.width = 100;
+    gridmap.info.height = 100;
+    gridmap.info.origin.position.x = 0.0;
+    gridmap.info.origin.position.y = 0.0;
+    gridmap.info.origin.position.z = 0.0;
+    gridmap.info.origin.orientation.x = 0.0;
+    gridmap.info.origin.orientation.y = 0.0;
+    gridmap.info.origin.orientation.z = 0.0;
+    gridmap.info.origin.orientation.w = 1.0;
+    gridmap.data.resize(gridmap.info.width * gridmap.info.height, 0);
+    gridmap_pub_->publish(gridmap);
   }
-  ~CreateGridmap() override = default;
+
+
 
 private:
   std::shared_ptr<spdlog::logger> logger_;
-  // std::shared_ptr<rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>> gridmap_pub_;
+  rclcpp::Node::SharedPtr node_;
+  rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr gridmap_pub_;
 };
-
-
-
-
 
 }  // namespace glim
 

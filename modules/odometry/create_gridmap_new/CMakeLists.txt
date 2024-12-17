@@ -19,3 +19,10 @@ target_link_libraries(create_gridmap_new
   glim::glim
   rclcpp::rclcpp
 )
+
+# シンボルルックアップエラーが出るため、これは必要。
+# なお、上のほうの  ${nav_msgs_INCLUDE_DIRS} これはいるかわからん。
+ament_target_dependencies(
+  create_gridmap_new
+  nav_msgs
+)

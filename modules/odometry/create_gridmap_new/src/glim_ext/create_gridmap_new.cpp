@@ -46,16 +46,7 @@ public:
 
     last_pub_time_ = node_->get_clock()->now();
 
-    // 1. rosにon_new_submapからPubできるかテストしてみる
-    // 2. SubmapをGridmapにしてPubする
-    // 3. Realtime点群、on_new_frameか、on_update_framesのどちらがいいのか検討してこれも実装
-
-    // next: 
-    // 最終的にPubするGridmapはタイマーコールバックで実装する。
-    // とりあえずコールバックで受け取ったら変数にいれまくる、という処理を書く。
-    // タイマーコールバックではそれを読み取るだけだからスレッドセーフ...なのか？要確認。
-
-    // タイマーコールバックめんどそう。てか、new_frameが定期的に呼ばれるので、そこをTriggerにして処理することにする。
+    // new_frameが定期的に呼ばれるので、そこをTriggerにして処理することにする。
 
     SubMappingCallbacks::on_new_submap.add([this](const SubMap::ConstPtr& submap) {
       std::cout << console::blue;
@@ -80,7 +71,6 @@ public:
   void on_new_submap(const SubMap::ConstPtr&  submap){
     logger_ -> info("New submap received");
  
-    
     const auto& t_world_origin = submap->T_world_origin;
     for (size_t i = 0; i < submap->frame->size(); i++) {
       const Eigen::Vector4d& pt = submap->frame->points[i];
@@ -96,15 +86,27 @@ public:
         }
       }
     }
-    
   }
 
   void on_update_frames(const std::vector<EstimationFrame::ConstPtr>& frames) {
-    for (const auto& frame : frames) {
-
-    }
-
     std::fill(gridmap_realtime_data_.begin(), gridmap_realtime_data_.end(), 0);
+    for (const auto& frame : frames) {
+      const auto& t_world_sensor = frame->T_world_sensor();
+      for (size_t i = 0; i < frame->frame->size(); i++) {
+        const Eigen::Vector4d& pt = frame->frame->points[i];
+        Eigen::Vector4d pt_world = t_world_sensor * pt;
+
+        if (pt_world.z() >= lower_bound_for_pt_z_ && pt_world.z() <= upper_bound_for_pt_z_) {
+          int x = static_cast<int>((pt_world.x() - gridmap_origin_x_) / gridmap_resolution_);
+          int y = static_cast<int>((pt_world.y() - gridmap_origin_y_) / gridmap_resolution_);
+
+          if (x >= 0 && x < grid_width_ && y >= 0 && y < grid_height_) {
+            int index = y * grid_width_ + x;
+            gridmap_realtime_data_[index] = 100;
+          }
+        }
+      }
+    }
 
     // 前回のPubが1秒以上前であればPubする
     auto now = node_->get_clock()->now();

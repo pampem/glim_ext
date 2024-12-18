@@ -19,8 +19,6 @@
 
 #include <nav_msgs/msg/occupancy_grid.hpp>
 
-// グローバル変数は使えないことが多いので注意。特にROS関連。
-
 namespace glim {
 
 class CreateGridmap : public ExtensionModule {
@@ -35,7 +33,7 @@ public:
     grid_height_ = config.param<int>("gridmap_param", "height", 60);
     gridmap_origin_x_ = config.param<float>("gridmap_param", "origin_x", -25.0F);
     gridmap_origin_y_ = config.param<float>("gridmap_param", "origin_y", -25.0F);
-    resolution_ = config.param<float>("gridmap_param", "resolution", 1.0F);
+    gridmap_resolution_ = config.param<float>("gridmap_param", "resolution", 1.0F);
     lower_bound_for_pt_z_ = config.param<float>("gridmap_param", "lower_bound_for_pt_z", 0.5F);
     upper_bound_for_pt_z_ = config.param<float>("gridmap_param", "upper_bound_for_pt_z", 1.5F);
     gridmap_data_ = std::vector<int>(grid_width_ * grid_height_, 0);
@@ -46,9 +44,18 @@ public:
 
     gridmap_pub_ = node_->create_publisher<nav_msgs::msg::OccupancyGrid>("gridmap", 10);
 
+    last_pub_time_ = node_->get_clock()->now();
+
     // 1. rosにon_new_submapからPubできるかテストしてみる
     // 2. SubmapをGridmapにしてPubする
     // 3. Realtime点群、on_new_frameか、on_update_framesのどちらがいいのか検討してこれも実装
+
+    // next: 
+    // 最終的にPubするGridmapはタイマーコールバックで実装する。
+    // とりあえずコールバックで受け取ったら変数にいれまくる、という処理を書く。
+    // タイマーコールバックではそれを読み取るだけだからスレッドセーフ...なのか？要確認。
+
+    // タイマーコールバックめんどそう。てか、new_frameが定期的に呼ばれるので、そこをTriggerにして処理することにする。
 
     SubMappingCallbacks::on_new_submap.add([this](const SubMap::ConstPtr& submap) {
       std::cout << console::blue;
@@ -70,23 +77,26 @@ public:
   }
   ~CreateGridmap() override = default;
   
-  void on_new_submap(const SubMap::ConstPtr&  /*submap*/){
+  void on_new_submap(const SubMap::ConstPtr&  submap){
     logger_ -> info("New submap received");
-    nav_msgs::msg::OccupancyGrid gridmap;
-    gridmap.header.stamp = node_->get_clock()->now();
-    gridmap.header.frame_id = "map";
-    gridmap.info.resolution = 0.1;
-    gridmap.info.width = 100;
-    gridmap.info.height = 100;
-    gridmap.info.origin.position.x = 0.0;
-    gridmap.info.origin.position.y = 0.0;
-    gridmap.info.origin.position.z = 0.0;
-    gridmap.info.origin.orientation.x = 0.0;
-    gridmap.info.origin.orientation.y = 0.0;
-    gridmap.info.origin.orientation.z = 0.0;
-    gridmap.info.origin.orientation.w = 1.0;
-    gridmap.data.resize(gridmap.info.width * gridmap.info.height, 0);
-    gridmap_pub_->publish(gridmap);
+ 
+    
+    const auto& t_world_origin = submap->T_world_origin;
+    for (size_t i = 0; i < submap->frame->size(); i++) {
+      const Eigen::Vector4d& pt = submap->frame->points[i];
+      Eigen::Vector4d pt_world = t_world_origin * pt;
+
+      if (pt_world.z() >= lower_bound_for_pt_z_ && pt_world.z() <= upper_bound_for_pt_z_) {
+        int x = static_cast<int>((pt_world.x() - gridmap_origin_x_) / gridmap_resolution_);
+        int y = static_cast<int>((pt_world.y() - gridmap_origin_y_) / gridmap_resolution_);
+
+        if (x >= 0 && x < grid_width_ && y >= 0 && y < grid_height_) {
+          int index = y * grid_width_ + x;
+          gridmap_submap_data_[index] = 100;
+        }
+      }
+    }
+    
   }
 
   void on_update_frames(const std::vector<EstimationFrame::ConstPtr>& frames) {
@@ -94,12 +104,40 @@ public:
 
     }
 
+    std::fill(gridmap_realtime_data_.begin(), gridmap_realtime_data_.end(), 0);
+
+    // 前回のPubが1秒以上前であればPubする
+    auto now = node_->get_clock()->now();
+    if ((now - last_pub_time_).seconds() >= 1.0) {
+
+    nav_msgs::msg::OccupancyGrid gridmap;
+    gridmap.header.stamp = node_->get_clock()->now();
+    gridmap.header.frame_id = gridmap_frame_id_;
+    gridmap.info.resolution = gridmap_resolution_;
+    gridmap.info.width = grid_width_;
+    gridmap.info.height = grid_height_;
+    gridmap.info.origin.position.x = gridmap_origin_x_;
+    gridmap.info.origin.position.y = gridmap_origin_y_;
+    gridmap.data.resize(gridmap.info.width * gridmap.info.height, 0);
+
+    for (int y = 0; y < grid_height_; ++y) {
+      for (int x = 0; x < grid_width_; ++x) {
+        int index = y * grid_width_ + x;
+        gridmap.data[index] =
+          std::max(gridmap_realtime_data_[index], gridmap_submap_data_[index]);
+      }
+    }
+
+    gridmap_pub_->publish(gridmap);
+    last_pub_time_ = now;
+    }
   }
 
 private:
   std::shared_ptr<spdlog::logger> logger_;
   rclcpp::Node::SharedPtr node_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr gridmap_pub_;
+  rclcpp::Time last_pub_time_;
 
   std::vector<int> gridmap_data_;
   std::vector<int> gridmap_realtime_data_;
@@ -109,7 +147,7 @@ private:
   float gridmap_origin_x_;  // gridmapの原点[m]。ワールド座標系に対応する。
   // 原点はGridmapの左下の点。それがワールド座標系のどこに位置するか。
   float gridmap_origin_y_;  // gridmapの原点[m]。ワールド座標系に対応する。
-  float resolution_;        // Gridmap 1セルの高さ(幅)。1セルは正方形。
+  float gridmap_resolution_;        // Gridmap 1セルの高さ(幅)。1セルは正方形。
   float lower_bound_for_pt_z_;  // Gridmapに入れる点の高さ方向のフィルタリング。最低高さ。
   float upper_bound_for_pt_z_;  // 最高高さ。
   std::string gridmap_frame_id_;

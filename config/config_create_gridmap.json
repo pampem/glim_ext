@@ -1,6 +1,6 @@
 {
   "gridmap_param": {
-    "frame_id": "odomfjaofja",
+    "frame_id": "odom",
     "width": 60,
     "height": 60,
     "origin_x": -25.0,

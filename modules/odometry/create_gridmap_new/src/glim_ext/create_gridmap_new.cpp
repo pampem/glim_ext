@@ -4,8 +4,6 @@
 
 #include <rclcpp/rclcpp.hpp>
 
-#include <opencv2/core.hpp>
-
 #include <gtsam_points/optimizers/levenberg_marquardt_ext.hpp>
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_ext.hpp>
 #include <gtsam_points/optimizers/incremental_fixed_lag_smoother_with_fallback.hpp>
@@ -36,17 +34,18 @@ public:
     gridmap_resolution_ = config.param<float>("gridmap_param", "resolution", 1.0F);
     lower_bound_for_pt_z_ = config.param<float>("gridmap_param", "lower_bound_for_pt_z", 0.5F);
     upper_bound_for_pt_z_ = config.param<float>("gridmap_param", "upper_bound_for_pt_z", 1.5F);
+    gridmap_topic_name_ = config.param<std::string>("gridmap_param", "topic_name", "slam_gridmap");
     gridmap_data_ = std::vector<int>(grid_width_ * grid_height_, 0);
     gridmap_realtime_data_ = std::vector<int>(grid_width_ * grid_height_, 0);
     gridmap_submap_data_ = std::vector<int>(grid_width_ * grid_height_, 0);
 
     node_ = rclcpp::Node::make_shared("create_gridmap_new_node");
 
-    gridmap_pub_ = node_->create_publisher<nav_msgs::msg::OccupancyGrid>("gridmap", 10);
+    gridmap_pub_ = node_->create_publisher<nav_msgs::msg::OccupancyGrid>(gridmap_topic_name_, 10);
 
     last_pub_time_ = node_->get_clock()->now();
 
-    // new_frameが定期的に呼ばれるので、そこをTriggerにして処理することにする。
+    // on_update_frameが定期的に呼ばれるので、そこをTriggerにして処理することにする。
 
     SubMappingCallbacks::on_new_submap.add([this](const SubMap::ConstPtr& submap) {
       std::cout << console::blue;
@@ -125,8 +124,9 @@ public:
     for (int y = 0; y < grid_height_; ++y) {
       for (int x = 0; x < grid_width_; ++x) {
         int index = y * grid_width_ + x;
-        gridmap.data[index] =
-          std::max(gridmap_realtime_data_[index], gridmap_submap_data_[index]);
+        // gridmap.data[index] =
+        //   std::max(gridmap_realtime_data_[index], gridmap_submap_data_[index]);
+        gridmap.data[index] = gridmap_submap_data_[index];
       }
     }
 
@@ -153,6 +153,7 @@ private:
   float lower_bound_for_pt_z_;  // Gridmapに入れる点の高さ方向のフィルタリング。最低高さ。
   float upper_bound_for_pt_z_;  // 最高高さ。
   std::string gridmap_frame_id_;
+  std::string gridmap_topic_name_;
 };
 
 }  // namespace glim

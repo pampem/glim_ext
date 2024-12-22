@@ -7,7 +7,7 @@
     "origin_y": -25.0,
     "resolution": 1.0,
     "lower_bound_for_pt_z": 0.5,
-    "upper_bound_for_pt_z": 1.5,
+    "upper_bound_for_pt_z": 0.5,
     "topic_name": "/slam_gridmap"
   }
 }

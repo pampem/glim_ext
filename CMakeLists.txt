@@ -47,9 +47,10 @@ list(APPEND glim_ext_LIBRARIES glim_ext)
 add_subdirectory(modules/example/glim_callback_demo)
 list(APPEND glim_ext_LIBRARIES glim_callback_demo)
 
-add_subdirectory(modules/odometry/create_gridmap_new)
-list(APPEND glim_ext_LIBRARIES create_gridmap_new)
-
+if(ENABLE_EAPM_PATHPLANNER)
+  add_subdirectory(modules/odometry/create_gridmap_new)
+  list(APPEND glim_ext_LIBRARIES create_gridmap_new)
+endif()
 # Odometry estimation modules
 if(ENABLE_ORBSLAM)
   add_subdirectory(modules/odometry/orb_slam_odometry)
@@ -64,11 +65,6 @@ endif()
 if(ENABLE_IMUVAL)
   add_subdirectory(modules/odometry/imu_validator)
   list(APPEND glim_ext_LIBRARIES imu_validator)
-endif()
-
-if(ENABLE_EAPM_PATHPLANNER)
-  add_subdirectory(modules/odometry/create_gridmap)
-  list(APPEND glim_ext_LIBRARIES create_gridmap)
 endif()
 
 # Local and global mapping modules

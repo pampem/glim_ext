@@ -22,7 +22,7 @@ namespace glim {
 class CreateGridmap : public ExtensionModule {
 public:
   CreateGridmap() : logger_(create_module_logger("create_gridmap")) {
-    logger_ -> info("Starting create_gridmap...");
+    logger_->info("Starting create_gridmap...");
 
     glim::Config config(glim::GlobalConfigExt::get_config_path("config_create_gridmap"));
 
@@ -33,7 +33,7 @@ public:
     gridmap_origin_y_ = config.param<float>("gridmap_param", "origin_y", -25.0F);
     gridmap_resolution_ = config.param<float>("gridmap_param", "resolution", 1.0F);
     lower_bound_for_pt_z_ = config.param<float>("gridmap_param", "lower_bound_for_pt_z", 0.5F);
-    upper_bound_for_pt_z_ = config.param<float>("gridmap_param", "upper_bound_for_pt_z", 1.5F);
+    upper_bound_for_pt_z_ = config.param<float>("gridmap_param", "upper_bound_for_pt_z", 0.5F);
     gridmap_topic_name_ = config.param<std::string>("gridmap_param", "topic_name", "slam_gridmap");
     gridmap_data_ = std::vector<int>(grid_width_ * grid_height_, 0);
     gridmap_realtime_data_ = std::vector<int>(grid_width_ * grid_height_, 0);
@@ -57,25 +57,29 @@ public:
       on_new_submap(submap);
     });
 
-    OdometryEstimationCallbacks::on_update_frames.add([this](const
-    std::vector<EstimationFrame::ConstPtr>& frames) { std::cout << console::green; std::cout <<
-    boost::format("--- OdometryEstimation::on_update_frames (thread:%d) ---") %
-    std::this_thread::get_id() << std::endl; std::cout << "frames:" << frames.size() << std::endl;
-      std::cout << console::reset;
-      on_update_frames(frames);
-    });
+    OdometryEstimationCallbacks::on_update_frames.add(
+      [this](const std::vector<EstimationFrame::ConstPtr>& frames) {
+        // std::cout << console::green;
+        // std::cout << boost::format("--- OdometryEstimation::on_update_frames (thread:%d) ---") %
+        //                std::this_thread::get_id()
+        //           << std::endl;
+        // std::cout << "frames:" << frames.size() << std::endl;
+        // std::cout << console::reset;
+        on_update_frames(frames);
+      });
   }
   ~CreateGridmap() override = default;
-  
-  void on_new_submap(const SubMap::ConstPtr&  submap){
-    logger_ -> info("New submap received");
- 
+
+  void on_new_submap(const SubMap::ConstPtr& submap) {
+    logger_->info("New submap received");
+
     const auto& t_world_origin = submap->T_world_origin;
     for (size_t i = 0; i < submap->frame->size(); i++) {
       const Eigen::Vector4d& pt = submap->frame->points[i];
       Eigen::Vector4d pt_world = t_world_origin * pt;
-
-      if (pt_world.z() >= lower_bound_for_pt_z_ && pt_world.z() <= upper_bound_for_pt_z_) {
+      if (
+        pt_world.z() >= (current_z_position_ - lower_bound_for_pt_z_) &&
+        pt_world.z() <= (current_z_position_ + upper_bound_for_pt_z_)) {
         int x = static_cast<int>((pt_world.x() - gridmap_origin_x_) / gridmap_resolution_);
         int y = static_cast<int>((pt_world.y() - gridmap_origin_y_) / gridmap_resolution_);
 
@@ -95,7 +99,9 @@ public:
         const Eigen::Vector4d& pt = frame->frame->points[i];
         Eigen::Vector4d pt_world = t_world_sensor * pt;
 
-        if (pt_world.z() >= lower_bound_for_pt_z_ && pt_world.z() <= upper_bound_for_pt_z_) {
+        if (
+          pt_world.z() >= (current_z_position_ - lower_bound_for_pt_z_) &&
+          pt_world.z() <= (current_z_position_ + upper_bound_for_pt_z_)) {
           int x = static_cast<int>((pt_world.x() - gridmap_origin_x_) / gridmap_resolution_);
           int y = static_cast<int>((pt_world.y() - gridmap_origin_y_) / gridmap_resolution_);
 
@@ -107,31 +113,38 @@ public:
       }
     }
 
+    Eigen::Isometry3d t_world_sensor = frames.back()->T_world_sensor();
+    current_z_position_ = t_world_sensor.translation().z();
+    std::ostringstream oss;
+    // oss << t_world_sensor.matrix();
+
+    // logger_->info("T_world_sensor:\n{}", oss.str());
+    logger_->info("z_position: {}", current_z_position_);
+
     // 前回のPubが1秒以上前であればPubする
     auto now = node_->get_clock()->now();
     if ((now - last_pub_time_).seconds() >= 1.0) {
+      nav_msgs::msg::OccupancyGrid gridmap;
+      gridmap.header.stamp = node_->get_clock()->now();
+      gridmap.header.frame_id = gridmap_frame_id_;
+      gridmap.info.resolution = gridmap_resolution_;
+      gridmap.info.width = grid_width_;
+      gridmap.info.height = grid_height_;
+      gridmap.info.origin.position.x = gridmap_origin_x_;
+      gridmap.info.origin.position.y = gridmap_origin_y_;
+      gridmap.data.resize(gridmap.info.width * gridmap.info.height, 0);
 
-    nav_msgs::msg::OccupancyGrid gridmap;
-    gridmap.header.stamp = node_->get_clock()->now();
-    gridmap.header.frame_id = gridmap_frame_id_;
-    gridmap.info.resolution = gridmap_resolution_;
-    gridmap.info.width = grid_width_;
-    gridmap.info.height = grid_height_;
-    gridmap.info.origin.position.x = gridmap_origin_x_;
-    gridmap.info.origin.position.y = gridmap_origin_y_;
-    gridmap.data.resize(gridmap.info.width * gridmap.info.height, 0);
-
-    for (int y = 0; y < grid_height_; ++y) {
-      for (int x = 0; x < grid_width_; ++x) {
-        int index = y * grid_width_ + x;
-        // gridmap.data[index] =
-        //   std::max(gridmap_realtime_data_[index], gridmap_submap_data_[index]);
-        gridmap.data[index] = gridmap_submap_data_[index];
+      for (int y = 0; y < grid_height_; ++y) {
+        for (int x = 0; x < grid_width_; ++x) {
+          int index = y * grid_width_ + x;
+          // gridmap.data[index] =
+          //   std::max(gridmap_realtime_data_[index], gridmap_submap_data_[index]);
+          gridmap.data[index] = gridmap_submap_data_[index];
+        }
       }
-    }
 
-    gridmap_pub_->publish(gridmap);
-    last_pub_time_ = now;
+      gridmap_pub_->publish(gridmap);
+      last_pub_time_ = now;
     }
   }
 
@@ -148,10 +161,11 @@ private:
   int grid_height_;         // gridmapの高さ。gridmapのセルがいくつ縦にあるか
   float gridmap_origin_x_;  // gridmapの原点[m]。ワールド座標系に対応する。
   // 原点はGridmapの左下の点。それがワールド座標系のどこに位置するか。
-  float gridmap_origin_y_;  // gridmapの原点[m]。ワールド座標系に対応する。
-  float gridmap_resolution_;        // Gridmap 1セルの高さ(幅)。1セルは正方形。
+  float gridmap_origin_y_;    // gridmapの原点[m]。ワールド座標系に対応する。
+  float gridmap_resolution_;  // Gridmap 1セルの高さ(幅)。1セルは正方形。
   float lower_bound_for_pt_z_;  // Gridmapに入れる点の高さ方向のフィルタリング。最低高さ。
   float upper_bound_for_pt_z_;  // 最高高さ。
+  float current_z_position_;
   std::string gridmap_frame_id_;
   std::string gridmap_topic_name_;
 };

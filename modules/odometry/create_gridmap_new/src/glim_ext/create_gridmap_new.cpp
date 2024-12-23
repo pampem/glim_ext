@@ -72,6 +72,10 @@ public:
 
   void on_new_submap(const SubMap::ConstPtr& submap) {
     logger_->info("New submap received");
+    if(!is_submap_received_) {
+      is_submap_received_ = true;
+      // is_submap_received_ = trueにならないと、gridmapはPublishされない。
+    }
 
     const auto& t_world_origin = submap->T_world_origin;
     for (size_t i = 0; i < submap->frame->size(); i++) {
@@ -124,6 +128,9 @@ public:
     // 前回のPubが1秒以上前であればPubする
     auto now = node_->get_clock()->now();
     if ((now - last_pub_time_).seconds() >= 1.0) {
+      if(!is_submap_received_) {
+        return;
+      }
       nav_msgs::msg::OccupancyGrid gridmap;
       gridmap.header.stamp = node_->get_clock()->now();
       gridmap.header.frame_id = gridmap_frame_id_;
@@ -132,6 +139,7 @@ public:
       gridmap.info.height = grid_height_;
       gridmap.info.origin.position.x = gridmap_origin_x_;
       gridmap.info.origin.position.y = gridmap_origin_y_;
+      gridmap.info.origin.position.z = current_z_position_;
       gridmap.data.resize(gridmap.info.width * gridmap.info.height, 0);
 
       for (int y = 0; y < grid_height_; ++y) {
@@ -153,6 +161,7 @@ private:
   rclcpp::Node::SharedPtr node_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr gridmap_pub_;
   rclcpp::Time last_pub_time_;
+  bool is_submap_received_ = false;
 
   std::vector<int> gridmap_data_;
   std::vector<int> gridmap_realtime_data_;

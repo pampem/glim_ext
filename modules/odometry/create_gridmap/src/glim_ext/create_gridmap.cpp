@@ -1,5 +1,13 @@
+/*
+  Copyright (c) 2024 Masashi Izumita
+
+  All rights reserved.
+ */
 #include <thread>
 #include <iostream>
+#include <memory>
+#include <string>
+#include <vector>
 #include <boost/format.hpp>
 
 #include <rclcpp/rclcpp.hpp>
@@ -39,7 +47,7 @@ public:
     gridmap_realtime_data_ = std::vector<int>(grid_width_ * grid_height_, 0);
     gridmap_submap_data_ = std::vector<int>(grid_width_ * grid_height_, 0);
 
-    node_ = rclcpp::Node::make_shared("create_gridmap_new_node");
+    node_ = rclcpp::Node::make_shared("create_gridmap_node");
 
     gridmap_pub_ = node_->create_publisher<nav_msgs::msg::OccupancyGrid>(gridmap_topic_name_, 10);
 
@@ -72,7 +80,7 @@ public:
 
   void on_new_submap(const SubMap::ConstPtr& submap) {
     logger_->info("New submap received");
-    if(!is_submap_received_) {
+    if (!is_submap_received_) {
       is_submap_received_ = true;
       // is_submap_received_ = trueにならないと、gridmapはPublishされない。
     }
@@ -128,7 +136,7 @@ public:
     // 前回のPubが1秒以上前であればPubする
     auto now = node_->get_clock()->now();
     if ((now - last_pub_time_).seconds() >= 1.0) {
-      if(!is_submap_received_) {
+      if (!is_submap_received_) {
         return;
       }
       nav_msgs::msg::OccupancyGrid gridmap;

@@ -48,8 +48,8 @@ add_subdirectory(modules/example/glim_callback_demo)
 list(APPEND glim_ext_LIBRARIES glim_callback_demo)
 
 if(ENABLE_EAPM_PATHPLANNER)
-  add_subdirectory(modules/odometry/create_gridmap_new)
-  list(APPEND glim_ext_LIBRARIES create_gridmap_new)
+  add_subdirectory(modules/odometry/create_gridmap)
+  list(APPEND glim_ext_LIBRARIES create_gridmap)
 endif()
 # Odometry estimation modules
 if(ENABLE_ORBSLAM)

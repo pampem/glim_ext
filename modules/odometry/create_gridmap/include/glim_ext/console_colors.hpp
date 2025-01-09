@@ -125,7 +125,7 @@ std::basic_ostream<CharT, Traits>& underline(std::basic_ostream<CharT, Traits>& 
 
 template <class CharT, class Traits>
 std::basic_ostream<CharT, Traits>& inverse(std::basic_ostream<CharT, Traits>& os) {
-  os << "\034[7m";
+  os << "\033[7m";
   return os;
 }
 

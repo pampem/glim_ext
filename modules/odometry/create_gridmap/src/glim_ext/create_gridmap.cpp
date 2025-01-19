@@ -79,6 +79,7 @@ public:
   ~CreateGridmap() override = default;
 
   void on_new_submap(const SubMap::ConstPtr& submap) {
+    std::fill(gridmap_submap_data_.begin(), gridmap_submap_data_.end(), 0);
     logger_->info("New submap received");
     if (!is_submap_received_) {
       is_submap_received_ = true;

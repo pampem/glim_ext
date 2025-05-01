@@ -132,7 +132,7 @@ public:
     // oss << t_world_sensor.matrix();
 
     // logger_->info("T_world_sensor:\n{}", oss.str());
-    logger_->info("z_position: {}", current_z_position_);
+    // logger_->info("z_position: {}", current_z_position_);
 
     // 前回のPubが1秒以上前であればPubする
     auto now = node_->get_clock()->now();

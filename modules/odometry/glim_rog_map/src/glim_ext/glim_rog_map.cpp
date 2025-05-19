@@ -113,14 +113,10 @@ private:
         if (nx < 0 || nx >= w_ || ny < 0 || ny >= h_) continue;
         int nidx = ny * w_ + nx;
 
-        bool keep = false;
-        for (const auto& off2 : offsets_) {
-          int mx = nx + off2.first;
-          int my = ny + off2.second;
-          if (mx < 0 || mx >= w_ || my < 0 || my >= h_) continue;
-          if (is_occupied(log_odds_[my * w_ + mx])) { keep = true; break; }
+        // 修正: 中心セル自身が占有セルでなければ解除
+        if (!is_occupied(log_odds_[nidx])) {
+          inflated_[nidx] = 0;
         }
-        if (!keep) inflated_[nidx] = 0;
       }
     }
   }
@@ -144,8 +140,8 @@ private:
     maybe_slide_window(pos_ws);   // スライド窓は従来通り
 
     for (const auto& fr : frames) {
-      Eigen::Isometry3d T   = fr->T_world_sensor();
-      Eigen::Vector3d  sens = T.translation();
+      Eigen::Isometry3d t   = fr->T_world_sensor();
+      Eigen::Vector3d  sens = t.translation();
 
       // センサ位置をグリッドに投影（整数）
       int sx = static_cast<int>((sens.x() - origin_x_) / res_);
@@ -153,7 +149,7 @@ private:
 
       for (size_t i = 0; i < fr->frame->size(); ++i) {
         const Eigen::Vector4d& pt = fr->frame->points[i];
-        Eigen::Vector4d pw = T * pt;
+        Eigen::Vector4d pw = t * pt;
 
         // ★★ 固定高さフィルタ（1 m ± 0.25 m）★★
         if (pw.z() < z_min_ || pw.z() > z_max_) continue;
@@ -205,7 +201,7 @@ private:
     for (size_t i = 0; i < log_odds_.size(); ++i) {
       if (is_occupied(log_odds_[i]))
         grid.data[i] = 100;
-      else if (inflated_[i])
+      else if (inflated_[i] != 0)
         grid.data[i] = inflated_[i];
       else if (std::fabs(log_odds_[i]) < 0.01F)
         grid.data[i] = -1;

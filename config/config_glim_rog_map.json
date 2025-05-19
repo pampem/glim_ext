@@ -1,13 +1,17 @@
 {
   "gridmap_param": {
     "frame_id": "odom",
-    "width": 100,
-    "height": 100,
+    "width": 60,
+    "height": 60,
     "origin_x": -25.0,
     "origin_y": -25.0,
-    "resolution": 1.0,
+    "resolution": 0.5,
     "lower_bound_for_pt_z": 0.5,
     "upper_bound_for_pt_z": 0.5,
-    "topic_name": "/slam_gridmap"
+    "topic_name": "/slam_gridmap",
+    "pub_rate": 0.1,
+    "inflation_radius": 1.5,
+    "grid_z_center": 1.0,
+    "grid_z_half_range": 0.25
   }
 }

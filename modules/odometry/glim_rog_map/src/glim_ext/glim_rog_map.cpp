@@ -5,8 +5,6 @@
 */
 
 #include <glim/util/logging.hpp>
-#include <thread>
-#include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
@@ -33,22 +31,21 @@ public:
 
     // ── load params ───────────────────────────────────────────────────────
     glim::Config cfg(glim::GlobalConfigExt::get_config_path("config_glim_rog_map"));
-    frame_id_  = cfg.param<std::string>("gridmap_param", "frame_id", "odom");
-    w_         = cfg.param<int>("gridmap_param", "width", 20);
-    h_         = cfg.param<int>("gridmap_param", "height", 20);
-    origin_x_  = cfg.param<float>("gridmap_param", "origin_x", -25.0F);
-    origin_y_  = cfg.param<float>("gridmap_param", "origin_y", -25.0F);
-    res_       = cfg.param<float>("gridmap_param", "resolution", 1.0F);
-    inflation_r_ = cfg.param<float>("gridmap_param", "inflation_radius", 1.5F);     // [m]
+    frame_id_ = cfg.param<std::string>("gridmap_param", "frame_id", "odom");
+    w_ = cfg.param<int>("gridmap_param", "width", 20);
+    h_ = cfg.param<int>("gridmap_param", "height", 20);
+    origin_x_ = cfg.param<float>("gridmap_param", "origin_x", -25.0F);
+    origin_y_ = cfg.param<float>("gridmap_param", "origin_y", -25.0F);
+    res_ = cfg.param<float>("gridmap_param", "resolution", 1.0F);
+    inflation_r_ = cfg.param<float>("gridmap_param", "inflation_radius", 1.5F);  // [m]
 
-    // ★★ ここが新しい高さフィルタ ★★
     grid_z_center_ = cfg.param<float>("gridmap_param", "grid_z_center", 1.0F);      // [m]
-    z_half_range_  = cfg.param<float>("gridmap_param", "grid_z_half_range", 0.25F); // ±[m]
+    z_half_range_ = cfg.param<float>("gridmap_param", "grid_z_half_range", 0.25F);  // ±[m]
     z_min_ = grid_z_center_ - z_half_range_;
     z_max_ = grid_z_center_ + z_half_range_;
 
-    topic_    = cfg.param<std::string>("gridmap_param", "topic_name", "slam_gridmap");
-    pub_rate_ = cfg.param<float>("gridmap_param", "pub_rate", 1.0F);                // Hz
+    topic_ = cfg.param<std::string>("gridmap_param", "topic_name", "slam_gridmap");
+    pub_rate_ = cfg.param<float>("gridmap_param", "pub_rate", 1.0F);  // Hz
 
     logger_->info("Configured pub_rate = {} Hz", pub_rate_);
 
@@ -59,7 +56,7 @@ public:
     inflated_.assign(w_ * h_, 0);     // 0=not inflated, 100=inflated
 
     node_ = rclcpp::Node::make_shared("glim_rog_bayes_rt_node");
-    pub_  = node_->create_publisher<nav_msgs::msg::OccupancyGrid>(topic_, rclcpp::QoS{10});
+    pub_ = node_->create_publisher<nav_msgs::msg::OccupancyGrid>(topic_, rclcpp::QoS{10});
     last_pub_ = node_->get_clock()->now();
 
     OdometryEstimationCallbacks::on_update_frames.add(
@@ -70,20 +67,20 @@ public:
 private:
   // ── helper: log-odds ⇄ prob ─────────────────────────────────────────────
   static inline float prob_from_log(float L) { return 1.0F - 1.0F / (1.0F + std::exp(L)); }
-  static inline bool  is_occupied(float L)   { return prob_from_log(L) > 0.65F; }
+  static inline bool is_occupied(float L) { return prob_from_log(L) > 0.65F; }
 
   // ── Bayesian update ─────────────────────────────────────────────────────
   inline void bayes_update(int idx, bool occ) {
-    constexpr float L_OCC  =  2.197224F; // logit(0.9)
-    constexpr float L_FREE = -0.847298F; // logit(0.3)
-    constexpr float L_CLIP =  4.595120F; // |logit(0.99)|
+    constexpr float l_occ = 2.197224F;    // logit(0.9)
+    constexpr float l_free = -0.847298F;  // logit(0.3)
+    constexpr float l_clip = 4.595120F;   // |logit(0.99)|
 
     bool was_occ = is_occupied(log_odds_[idx]);
-    log_odds_[idx] = std::clamp(log_odds_[idx] + (occ ? L_OCC : L_FREE), -L_CLIP, L_CLIP);
+    log_odds_[idx] = std::clamp(log_odds_[idx] + (occ ? l_occ : l_free), -l_clip, l_clip);
     bool now_occ = is_occupied(log_odds_[idx]);
 
-    if (now_occ && !was_occ)  rising_q_.push(idx);
-    if (!now_occ && was_occ)  falling_q_.push(idx);
+    if (now_occ && !was_occ) rising_q_.push(idx);
+    if (!now_occ && was_occ) falling_q_.push(idx);
   }
 
   // ── Incremental Inflation ───────────────────────────────────────────────
@@ -113,7 +110,6 @@ private:
         if (nx < 0 || nx >= w_ || ny < 0 || ny >= h_) continue;
         int nidx = ny * w_ + nx;
 
-        // 修正: 中心セル自身が占有セルでなければ解除
         if (!is_occupied(log_odds_[nidx])) {
           inflated_[nidx] = 0;
         }
@@ -137,11 +133,11 @@ private:
     if (frames.empty()) return;
 
     const Eigen::Vector3d& pos_ws = frames.back()->T_world_sensor().translation();
-    maybe_slide_window(pos_ws);   // スライド窓は従来通り
+    // 原点移動処理を削除
 
     for (const auto& fr : frames) {
-      Eigen::Isometry3d t   = fr->T_world_sensor();
-      Eigen::Vector3d  sens = t.translation();
+      Eigen::Isometry3d t = fr->T_world_sensor();
+      Eigen::Vector3d sens = t.translation();
 
       // センサ位置をグリッドに投影（整数）
       int sx = static_cast<int>((sens.x() - origin_x_) / res_);
@@ -169,11 +165,19 @@ private:
         int err = dx - dy;
         int x = sx;
         int y = sy;
-        while (x != gx || y != gy) {
-          bayes_update(y * w_ + x, false);
+        while (true) {
           int e2 = 2 * err;
-          if (e2 > -dy) { err -= dy; x += step_x; }
-          if (e2 <  dx) { err += dx; y += step_y; }
+          if (e2 > -dy) {
+            err -= dy;
+            x += step_x;
+          }
+          if (e2 < dx) {
+            err += dx;
+            y += step_y;
+          }
+          if (x == gx && y == gy) break;
+          if (x < 0 || x >= w_ || y < 0 || y >= h_) continue;
+          bayes_update(y * w_ + x, false);
         }
       }
     }
@@ -191,11 +195,11 @@ private:
     grid.header.stamp = now;
     grid.header.frame_id = frame_id_;
     grid.info.resolution = res_;
-    grid.info.width  = w_;
+    grid.info.width = w_;
     grid.info.height = h_;
     grid.info.origin.position.x = origin_x_;
     grid.info.origin.position.y = origin_y_;
-    grid.info.origin.position.z = grid_z_center_;   // ← 高さは固定
+    grid.info.origin.position.z = grid_z_center_;  // ← 高さは固定
     grid.data.resize(w_ * h_, -1);
 
     for (size_t i = 0; i < log_odds_.size(); ++i) {
@@ -212,27 +216,16 @@ private:
     last_pub_ = now;
   }
 
-  // ── Sliding window (ROG-style) ──────────────────────────────────────────
-  void maybe_slide_window(const Eigen::Vector3d& pos) {
-    const float thresh = res_ * w_ * 0.25F;  // 25 %
-    bool slid = false;
-    while (pos.x() - origin_x_ >  thresh) { origin_x_ += res_; slid = true; }
-    while (origin_x_ - pos.x() > thresh)  { origin_x_ -= res_; slid = true; }
-    while (pos.y() - origin_y_ >  thresh) { origin_y_ += res_; slid = true; }
-    while (origin_y_ - pos.y() > thresh)  { origin_y_ -= res_; slid = true; }
-    if (slid) logger_->debug("slide window → origin ({}, {})", origin_x_, origin_y_);
-  }
-
   // ── members ─────────────────────────────────────────────────────────────
   std::shared_ptr<spdlog::logger> logger_;
   rclcpp::Node::SharedPtr node_;
   rclcpp::Publisher<nav_msgs::msg::OccupancyGrid>::SharedPtr pub_;
   rclcpp::Time last_pub_;
 
-  int   w_, h_;
+  int w_, h_;
   float origin_x_, origin_y_, res_;
   float inflation_r_;
-  int   cells_inflation_;
+  int cells_inflation_;
 
   // ★ 高さフィルタ関連
   float grid_z_center_;
@@ -243,9 +236,9 @@ private:
   std::string topic_;
   float pub_rate_;
 
-  std::vector<float>    log_odds_;
-  std::vector<uint8_t>  inflated_;
-  std::queue<int>       rising_q_, falling_q_;
+  std::vector<float> log_odds_;
+  std::vector<uint8_t> inflated_;
+  std::queue<int> rising_q_, falling_q_;
   std::vector<std::pair<int, int>> offsets_;
 };
 

@@ -52,8 +52,9 @@ public:
     cells_inflation_ = static_cast<int>(std::ceil(inflation_r_ / res_));
     precompute_offsets();
 
-    log_odds_.assign(w_ * h_, 0.0F);  // Prior 0.5
-    inflated_.assign(w_ * h_, 0);     // 0=not inflated, 100=inflated
+    log_odds_.assign(w_ * h_, 0.0F);              // Prior 0.5
+    inflated_.assign(w_ * h_, 0);                 // 0=not inflated, 100=inflated
+    inflation_support_count_.assign(w_ * h_, 0);  // Initialize support count to 0
 
     node_ = rclcpp::Node::make_shared("glim_rog_bayes_rt_node");
     pub_ = node_->create_publisher<nav_msgs::msg::OccupancyGrid>(topic_, rclcpp::QoS{10});
@@ -83,9 +84,9 @@ private:
     if (!now_occ && was_occ) falling_q_.push(idx);
   }
 
-  // ── Incremental Inflation ───────────────────────────────────────────────
+  // ── Incremental Inflation (Corrected) ───────────────────────────────────
   void process_inflation() {
-    // Rising queue – add inflated cells
+    // Rising queue – add inflated cells and increment support count
     while (!rising_q_.empty()) {
       int center = rising_q_.front();
       rising_q_.pop();
@@ -95,12 +96,19 @@ private:
         int nx = cx + off.first;
         int ny = cy + off.second;
         if (nx < 0 || nx >= w_ || ny < 0 || ny >= h_) continue;
-        inflated_[ny * w_ + nx] = 100;
+        int nidx = ny * w_ + nx;
+
+        if (inflation_support_count_[nidx] == 0) {
+          // If it was not supported and now gets support, mark as inflated
+          inflated_[nidx] = 100;
+        }
+        inflation_support_count_[nidx]++;
       }
     }
-    // Falling queue – remove inflated cells no longer supported
+
+    // Falling queue – decrement support count and remove inflation if count drops to zero
     while (!falling_q_.empty()) {
-      int center = falling_q_.front();
+      int center = falling_q_.front();  // This cell *was* occupied, now is not
       falling_q_.pop();
       int cx = center % w_;
       int cy = center / w_;
@@ -110,8 +118,12 @@ private:
         if (nx < 0 || nx >= w_ || ny < 0 || ny >= h_) continue;
         int nidx = ny * w_ + nx;
 
-        if (!is_occupied(log_odds_[nidx])) {
-          inflated_[nidx] = 0;
+        if (inflation_support_count_[nidx] > 0) {  // Should be > 0 if it was supported by 'center'
+          inflation_support_count_[nidx]--;
+          if (inflation_support_count_[nidx] == 0) {
+            // If support count drops to zero, mark as not inflated
+            inflated_[nidx] = 0;
+          }
         }
       }
     }
@@ -131,9 +143,6 @@ private:
   // ── Frame callback ──────────────────────────────────────────────────────
   void on_frames(const std::vector<EstimationFrame::ConstPtr>& frames) {
     if (frames.empty()) return;
-
-    const Eigen::Vector3d& pos_ws = frames.back()->T_world_sensor().translation();
-    // 原点移動処理を削除
 
     for (const auto& fr : frames) {
       Eigen::Isometry3d t = fr->T_world_sensor();
@@ -158,26 +167,38 @@ private:
         bayes_update(gy * w_ + gx, true);
 
         // freespace raycast (Bresenham)
-        int dx = std::abs(gx - sx);
-        int dy = std::abs(gy - sy);
+        int dx_abs = std::abs(gx - sx);  // Renamed to avoid conflict with offsets_ dx
+        int dy_abs = std::abs(gy - sy);  // Renamed to avoid conflict with offsets_ dy
         int step_x = (sx < gx) ? 1 : -1;
         int step_y = (sy < gy) ? 1 : -1;
-        int err = dx - dy;
+        int err = dx_abs - dy_abs;
         int x = sx;
         int y = sy;
         while (true) {
+          if (x == gx && y == gy) break;  // Stop before updating the endpoint itself as free
+          // Check bounds before updating, and only update if not the endpoint
+          if (x >= 0 && x < w_ && y >= 0 && y < h_) {
+            bayes_update(y * w_ + x, false);
+          }
+
           int e2 = 2 * err;
-          if (e2 > -dy) {
-            err -= dy;
+          bool moved = false;
+          if (e2 > -dy_abs) {
+            if (x == gx) break;  // Avoid overshooting if only y needs to change
+            err -= dy_abs;
             x += step_x;
+            moved = true;
           }
-          if (e2 < dx) {
-            err += dx;
+          if (e2 < dx_abs) {
+            if (y == gy) break;  // Avoid overshooting if only x needs to change
+            err += dx_abs;
             y += step_y;
+            moved = true;
           }
-          if (x == gx && y == gy) break;
-          if (x < 0 || x >= w_ || y < 0 || y >= h_) continue;
-          bayes_update(y * w_ + x, false);
+          if (!moved && (x != gx || y != gy)) {  // Stuck, should not happen in standard Bresenham
+                                                 // if gx,gy is reachable
+            break;
+          }
         }
       }
     }
@@ -200,17 +221,27 @@ private:
     grid.info.origin.position.x = origin_x_;
     grid.info.origin.position.y = origin_y_;
     grid.info.origin.position.z = grid_z_center_;  // ← 高さは固定
-    grid.data.resize(w_ * h_, -1);
+    grid.data.resize(w_ * h_);  // Default value for OccupancyGrid is 0 (free), -1 (unknown)
 
     for (size_t i = 0; i < log_odds_.size(); ++i) {
-      if (is_occupied(log_odds_[i]))
-        grid.data[i] = 100;
-      else if (inflated_[i] != 0)
-        grid.data[i] = inflated_[i];
-      else if (std::fabs(log_odds_[i]) < 0.01F)
-        grid.data[i] = -1;
+      if (is_occupied(log_odds_[i]) || inflated_[i] == 100)
+        grid.data[i] = 100;          // Occupied or inflated
+      else if (std::fabs(log_odds_[i]) < 0.01F)  // Close to prior of 0.5 (log_odds 0)
+        grid.data[i] = -1;                       // Unknown
       else
-        grid.data[i] = static_cast<int8_t>(std::round(prob_from_log(log_odds_[i]) * 100.0F));
+        // For free cells, map probability to 0-100. prob_from_log will be < 0.65
+        // Standard OccupancyGrid: 0 is free.
+        // Values between 1 and 99 are typically also treated as free by costmaps,
+        // but 0 is the clearest "free".
+        // Let's ensure free cells (not occupied, not inflated, not unknown) are 0.
+        // P(occ) < 0.65, and not close to 0.5. For these, P(occ) could be e.g. 0.3
+        // log_odds for 0.3 is approx -0.84.
+        // If we want to explicitly mark "free" as 0:
+        if (log_odds_[i] < -0.405) {  // Corresponds to P(occ) < 0.4, reasonably confident free
+          grid.data[i] = 0;           // Free
+        } else {  // For probabilities between 0.4 and 0.65 (excluding unknown near 0.5)
+          grid.data[i] = static_cast<int8_t>(std::round(prob_from_log(log_odds_[i]) * 100.0F));
+        }
     }
     pub_->publish(grid);
     last_pub_ = now;
@@ -237,7 +268,9 @@ private:
   float pub_rate_;
 
   std::vector<float> log_odds_;
-  std::vector<uint8_t> inflated_;
+  std::vector<uint8_t> inflated_;  // 0 = not inflated, 100 = inflated
+  std::vector<int>
+    inflation_support_count_;  // Counts how many obstacles support inflation for a cell
   std::queue<int> rising_q_, falling_q_;
   std::vector<std::pair<int, int>> offsets_;
 };

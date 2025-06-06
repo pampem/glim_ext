@@ -177,8 +177,10 @@ private:
         while (true) {
           if (x == gx && y == gy) break;  // Stop before updating the endpoint itself as free
           // Check bounds before updating, and only update if not the endpoint
+
           if (x >= 0 && x < w_ && y >= 0 && y < h_) {
             bayes_update(y * w_ + x, false);
+            if (is_occupied(log_odds_[y * w_ + x])) break;
           }
 
           int e2 = 2 * err;
@@ -225,7 +227,7 @@ private:
 
     for (size_t i = 0; i < log_odds_.size(); ++i) {
       if (is_occupied(log_odds_[i]) || inflated_[i] == 100)
-        grid.data[i] = 100;          // Occupied or inflated
+        grid.data[i] = 100;                      // Occupied or inflated
       else if (std::fabs(log_odds_[i]) < 0.01F)  // Close to prior of 0.5 (log_odds 0)
         grid.data[i] = -1;                       // Unknown
       else

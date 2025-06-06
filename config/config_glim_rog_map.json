@@ -10,8 +10,8 @@
     "upper_bound_for_pt_z": 0.5,
     "topic_name": "/slam_gridmap",
     "pub_rate": 1.0,
-    "inflation_radius": 0.25,
-    "grid_z_center": 1.5,
+    "inflation_radius": 0.0,
+    "grid_z_center": 2.0,
     "grid_z_half_range": 0.25
   }
 }

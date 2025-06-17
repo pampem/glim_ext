@@ -68,16 +68,31 @@ public:
 private:
   // ── helper: log-odds ⇄ prob ─────────────────────────────────────────────
   static inline float prob_from_log(float L) { return 1.0F - 1.0F / (1.0F + std::exp(L)); }
-  static inline bool is_occupied(float L) { return prob_from_log(L) > 0.65F; }
+  static inline bool is_occupied(float L) { return prob_from_log(L) > 0.55F; }
 
   // ── Bayesian update ─────────────────────────────────────────────────────
-  inline void bayes_update(int idx, bool occ) {
-    constexpr float l_occ = 2.197224F;    // logit(0.9)
-    constexpr float l_free = -0.847298F;  // logit(0.3)
-    constexpr float l_clip = 4.595120F;   // |logit(0.99)|
+  inline void bayes_update(int idx, bool occ, float cell_dist) {
+    // 基本のログオッズ
+    constexpr float l_occ_base = 2.197224F;    // logit(0.9)
+    constexpr float l_free_base = -0.847298F;  // logit(0.3)
+    constexpr float l_clip = 4.595120F;
+    constexpr float update_weight = 1.0F;          // 0～1 の範囲でチューニング
+    constexpr float free_influence_radius = 2.0F;  // [m] 影響を受ける距離
+
+    // 距離によって free の影響度を落とす（例えば距離が2m以上なら 10% に）
+    float free_weight = 1.0F;
+    if (!occ) {
+      if (cell_dist > free_influence_radius)
+        free_weight = 0.1F;  // 2m 以上は 0.1 倍
+      else
+        free_weight = 1.0F - (cell_dist / free_influence_radius) * 0.9F;  // 0〜2mで 1.0→0.1 へ線形
+    }
+
+    float delta = update_weight * (occ ? l_occ_base : l_free_base * free_weight);
 
     bool was_occ = is_occupied(log_odds_[idx]);
-    log_odds_[idx] = std::clamp(log_odds_[idx] + (occ ? l_occ : l_free), -l_clip, l_clip);
+    log_odds_[idx] = std::clamp(log_odds_[idx] + delta, -l_clip, l_clip);
+
     bool now_occ = is_occupied(log_odds_[idx]);
 
     if (now_occ && !was_occ) rising_q_.push(idx);
@@ -164,7 +179,8 @@ private:
         if (gx < 0 || gx >= w_ || gy < 0 || gy >= h_) continue;
 
         // occupied cell
-        bayes_update(gy * w_ + gx, true);
+        float cell_dist = std::sqrt((gx - sx) * (gx - sx) + (gy - sy) * (gy - sy));
+        bayes_update(gy * w_ + gx, true, cell_dist);
 
         // freespace raycast (Bresenham)
         int dx_abs = std::abs(gx - sx);  // Renamed to avoid conflict with offsets_ dx
@@ -179,7 +195,8 @@ private:
           // Check bounds before updating, and only update if not the endpoint
 
           if (x >= 0 && x < w_ && y >= 0 && y < h_) {
-            bayes_update(y * w_ + x, false);
+            float cell_dist = std::sqrt((gx - x) * (gx - x) + (gy - y) * (gy - y));
+            bayes_update(y * w_ + x, false, cell_dist);
             if (is_occupied(log_odds_[y * w_ + x])) break;
           }
 

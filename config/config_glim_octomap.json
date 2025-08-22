@@ -1,0 +1,19 @@
+{
+  "octomap_param": {
+    "frame_id": "odom",
+    "resolution": 0.2,
+    "max_range": 10.0,
+    "min_x": -25.0,
+    "max_x": 25.0,
+    "min_y": -25.0,
+    "max_y": 25.0,
+    "min_z": -5.0,
+    "max_z": 5.0,
+    "prob_hit": 0.9,
+    "prob_miss": 0.3,
+    "clamping_thresh_min": 0.12,
+    "clamping_thresh_max": 0.97,
+    "topic_name": "/slam_octomap",
+    "pub_rate": 5.0
+  }
+}

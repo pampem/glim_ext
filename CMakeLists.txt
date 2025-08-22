@@ -53,6 +53,9 @@ if(ENABLE_EAPM_PATHPLANNER)
 
   add_subdirectory(modules/odometry/glim_rog_map)
   list(APPEND glim_ext_LIBRARIES glim_rog_map)
+
+  add_subdirectory(modules/odometry/glim_octomap)
+  list(APPEND glim_ext_LIBRARIES glim_octomap)
 endif()
 # Odometry estimation modules
 if(ENABLE_ORBSLAM)

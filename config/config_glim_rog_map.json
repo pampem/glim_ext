@@ -1,7 +1,7 @@
 // Sim
 {
   "gridmap_param": {
-    "frame_id": "odom",
+    "frame_id": "map",
     "width": 200,
     "height": 200,
     "origin_x": -10.0,
@@ -17,7 +17,7 @@
 // Real
 // {
 //   "gridmap_param": {
-//     "frame_id": "odom",
+//     "frame_id": "map",
 //     "width": 100,
 //     "height": 100,
 //     "origin_x": -8.5,

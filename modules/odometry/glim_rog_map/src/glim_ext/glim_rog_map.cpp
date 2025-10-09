@@ -11,6 +11,7 @@
 #include <queue>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <boost/format.hpp>
 
 #include <rclcpp/rclcpp.hpp>
@@ -30,7 +31,21 @@ public:
     logger_->info("Starting realtime Bayesian gridmap with incremental inflation …");
 
     // ── load params ───────────────────────────────────────────────────────
-    glim::Config cfg(glim::GlobalConfigExt::get_config_path("config_glim_rog_map"));
+    // Try to get config path from environment variable first, then fall back to default
+    std::string cfg_path = glim::GlobalConfigExt::get_config_path("config_glim_rog_map");
+
+    // Try to get ext_config_path from environment variable
+    const char* env_config_path = std::getenv("GLIM_EXT_CONFIG_PATH");
+    if (env_config_path != nullptr) {
+      logger_->info("Using config path from environment variable: {}", env_config_path);
+      cfg_path = std::string(env_config_path) + "/config_glim_rog_map.json";
+    } else {
+      logger_->info(
+        "No environment variable 'GLIM_EXT_CONFIG_PATH' found, using default: {}",
+        cfg_path);
+    }
+
+    glim::Config cfg(cfg_path);
     frame_id_ = cfg.param<std::string>("gridmap_param", "frame_id", "odom");
     w_ = cfg.param<int>("gridmap_param", "width", 20);
     h_ = cfg.param<int>("gridmap_param", "height", 20);

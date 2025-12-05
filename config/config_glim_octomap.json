@@ -13,7 +13,7 @@
     "prob_miss": 0.3,
     "clamping_thresh_min": 0.12,
     "clamping_thresh_max": 0.97,
-    "topic_name": "/slam_octomap",
-    "pub_rate": 5.0
+    "topic_name": "slam_octomap",
+    "pub_rate": 0.5
   }
 }

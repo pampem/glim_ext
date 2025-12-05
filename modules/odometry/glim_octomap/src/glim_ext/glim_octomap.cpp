@@ -48,7 +48,7 @@ public:
     clamping_thresh_min_ = cfg.param<float>("octomap_param", "clamping_thresh_min", 0.12F);
     clamping_thresh_max_ = cfg.param<float>("octomap_param", "clamping_thresh_max", 0.97F);
 
-    topic_ = cfg.param<std::string>("octomap_param", "topic_name", "/slam_octomap");
+    topic_ = cfg.param<std::string>("octomap_param", "topic_name", "slam_octomap");
     pub_rate_ = cfg.param<float>("octomap_param", "pub_rate", 5.0F);  // Hz
 
     logger_->info("Configured pub_rate = {} Hz, resolution = {} m", pub_rate_, resolution_);
@@ -62,8 +62,10 @@ public:
     octree_->setProbHit(prob_hit_);
     octree_->setProbMiss(prob_miss_);
 
+    auto qos = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
+
     node_ = rclcpp::Node::make_shared("glim_octomap_rt_node");
-    pub_ = node_->create_publisher<octomap_msgs::msg::Octomap>(topic_, rclcpp::QoS{10});
+    pub_ = node_->create_publisher<octomap_msgs::msg::Octomap>(topic_, qos);
     last_pub_ = node_->get_clock()->now();
 
     OdometryEstimationCallbacks::on_update_frames.add(

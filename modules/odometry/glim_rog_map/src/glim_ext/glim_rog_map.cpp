@@ -70,9 +70,9 @@ public:
     log_odds_.assign(w_ * h_, 0.0F);              // Prior 0.5
     inflated_.assign(w_ * h_, 0);                 // 0=not inflated, 100=inflated
     inflation_support_count_.assign(w_ * h_, 0);  // Initialize support count to 0
-
+    auto qos = rclcpp::QoS(rclcpp::KeepLast(10)).best_effort();
     node_ = rclcpp::Node::make_shared("glim_rog_bayes_rt_node");
-    pub_ = node_->create_publisher<nav_msgs::msg::OccupancyGrid>(topic_, rclcpp::QoS{10});
+    pub_ = node_->create_publisher<nav_msgs::msg::OccupancyGrid>(topic_, qos);
     last_pub_ = node_->get_clock()->now();
 
     OdometryEstimationCallbacks::on_update_frames.add(
